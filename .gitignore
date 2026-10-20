@@ -10,3 +10,9 @@ crash.log
 *.pfx
 __pycache__/
 *.pyc
+node_modules/
+dist/
+cdk.out/
+cdk.context.json
+config.local.json
+cdk-outputs.json

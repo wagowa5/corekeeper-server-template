@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Fetch the optional webhook at runtime, without exposing it to Terraform state."""
+"""Fetch the optional webhook at runtime, without exposing it to CloudFormation templates."""
 import json
 import os
 import subprocess

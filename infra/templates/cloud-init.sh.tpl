@@ -9,7 +9,7 @@ printf '%s' '${config_b64}' | base64 -d > /etc/corekeeper/config.json
 printf '%s' '${backup_b64}' | base64 -d > /usr/local/sbin/corekeeper-backup
 printf '%s' '${launch_b64}' | base64 -d > /usr/local/sbin/corekeeper-launch
 chmod 700 /usr/local/sbin/corekeeper-backup /usr/local/sbin/corekeeper-launch
-# EBS attachment is a separate Terraform resource; wait for it after instance creation.
+# EBS attachment is a separate CloudFormation resource; wait for it after instance creation.
 device=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${volume_id}
 for attempt in $(seq 1 120); do
   test -b "$device" && break

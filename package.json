@@ -1,0 +1,16 @@
+{
+  "name": "corekeeper-server-template",
+  "version": "1.0.0",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc",
+    "test": "npm run build && node --test dist/tests/*.test.js && python3 -m unittest discover -s tests -v",
+    "cdk": "cdk",
+    "synth": "npm run build && cdk synth",
+    "diff": "npm run build && cdk diff",
+    "deploy": "npm run build && cdk deploy"
+  },
+  "dependencies": { "aws-cdk-lib": "2.273.0", "constructs": "10.8.1" },
+  "devDependencies": { "@types/node": "22.20.5", "aws-cdk": "2.1146.0", "typescript": "5.9.3" }
+}
