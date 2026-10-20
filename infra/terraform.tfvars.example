@@ -1,0 +1,12 @@
+region = "ap-northeast-1"
+name = "corekeeper"
+instance_type = "t3.large"
+world_name = "Core Keeper Server"
+max_players = 4
+# Pin a reviewed image digest before production use.
+container_image = "escaping/core-keeper-dedicated:latest"
+schedules_enabled = false
+start_schedule = "cron(0 18 * * ? *)"
+stop_schedule = "cron(0 1 * * ? *)"
+# discord_parameter_arn = "arn:aws:ssm:ap-northeast-1:123456789012:parameter/corekeeper/discord"
+# Supply public CA PEM via TF_VAR_windows_ca_certificate; do not put private keys here.
