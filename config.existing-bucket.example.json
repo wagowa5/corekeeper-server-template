@@ -1,0 +1,15 @@
+{
+  "backupBucket": {
+    "mode": "existing",
+    "bucketName": "replace-with-your-existing-backup-bucket"
+  },
+  "name": "corekeeper",
+  "region": "ap-northeast-1",
+  "instanceType": "t3.large",
+  "containerImage": "escaping/core-keeper-dedicated:latest",
+  "worldName": "Core Keeper Server",
+  "maxPlayers": 4,
+  "schedulesEnabled": false,
+  "startSchedule": "cron(0 18 * * ? *)",
+  "stopSchedule": "cron(0 1 * * ? *)"
+}

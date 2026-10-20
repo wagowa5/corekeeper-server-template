@@ -1,0 +1,71 @@
+#!/bin/bash
+set -Eeuo pipefail
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y docker.io awscli python3 util-linux
+systemctl enable --now docker
+install -d -m 700 /etc/corekeeper
+printf '%s' '${config_b64}' | base64 -d > /etc/corekeeper/config.json
+printf '%s' '${backup_b64}' | base64 -d > /usr/local/sbin/corekeeper-backup
+printf '%s' '${launch_b64}' | base64 -d > /usr/local/sbin/corekeeper-launch
+chmod 700 /usr/local/sbin/corekeeper-backup /usr/local/sbin/corekeeper-launch
+# EBS attachment is a separate CloudFormation resource; wait for it after instance creation.
+device=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${volume_id}
+for attempt in $(seq 1 120); do
+  test -b "$device" && break
+  sleep 5
+done
+test -b "$device"
+# Format only a genuinely blank device. Fail closed for unknown signatures.
+if ! blkid "$device" >/dev/null; then
+  test -z "$(wipefs -n --noheadings -o TYPE "$device")"
+  mkfs.ext4 "$device"
+fi
+test "$(blkid -s TYPE -o value "$device")" = ext4
+uuid=$(blkid -s UUID -o value "$device")
+mkdir -p /srv/corekeeper
+if ! grep -q "UUID=$uuid " /etc/fstab; then
+  echo "UUID=$uuid /srv/corekeeper ext4 defaults 0 2" >> /etc/fstab
+fi
+mount /srv/corekeeper
+install -d -o 1000 -g 1000 /srv/corekeeper/server-data /srv/corekeeper/server-files
+cat > /etc/systemd/system/corekeeper.service <<'UNIT'
+[Unit]
+Description=Core Keeper dedicated server
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+RequiresMountsFor=/srv/corekeeper
+[Service]
+Type=simple
+RuntimeDirectory=corekeeper
+RuntimeDirectoryMode=0700
+ExecStart=/usr/local/sbin/corekeeper-launch
+ExecStop=/usr/bin/docker stop -t 120 core-keeper-dedicated
+TimeoutStopSec=150
+Restart=on-failure
+RestartSec=30
+[Install]
+WantedBy=multi-user.target
+UNIT
+cat > /etc/systemd/system/corekeeper-backup.service <<'UNIT'
+[Unit]
+Description=Consistent Core Keeper S3 backup
+After=network-online.target
+RequiresMountsFor=/srv/corekeeper
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/corekeeper-backup
+TimeoutStartSec=1500
+UNIT
+cat > /etc/systemd/system/corekeeper-backup.timer <<'UNIT'
+[Unit]
+Description=Daily Core Keeper backup at 00:55 Japan time
+[Timer]
+OnCalendar=*-*-* 00:55:00 Asia/Tokyo
+Persistent=false
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now corekeeper corekeeper-backup.timer
