@@ -1,0 +1,2 @@
+# corekeeper-server-template
+corekeeperのserverテンプレート
