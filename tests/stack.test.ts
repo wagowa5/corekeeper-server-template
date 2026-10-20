@@ -12,7 +12,7 @@ import { loadConfig, ServerConfig } from '../lib/config';
 function synth(overrides: Partial<ServerConfig> = {}) {
   return Template.fromStack(new CoreKeeperStack(new App(), 'Test', {
     env: { account: '123456789012', region: 'ap-northeast-1' },
-    config: { ...loadConfig(), ...overrides },
+    config: { ...loadConfig(resolve('config.example.json')), ...overrides },
   }));
 }
 
@@ -97,6 +97,7 @@ test('rendered bootstrap preserves scripts and JSON, passes bash syntax and fits
   assert.ok(!script.includes('${config_b64}'));
   const configMatch = script.match(/printf '%s' '([^']+)' \| base64 -d > \/etc\/corekeeper\/config.json/)!;
   const config = JSON.parse(Buffer.from(configMatch[1], 'base64').toString());
+  assert.equal(config.bucket, 'test-backups');
   assert.equal(config.world_name, "Friends' world");
   assert.match(config.discord_parameter_arn, /parameter\/corekeeper\/discord$/);
   assert.equal(spawnSync('bash', ['-n'], { input: script }).status, 0);
@@ -109,13 +110,57 @@ test('config rejects type errors, unknown fields, ARM and private keys', () => {
   const dir = mkdtempSync(join(tmpdir(), 'corekeeper-config-'));
   try {
     const file = join(dir, 'config.json');
+    assert.throws(() => loadConfig(), /backupBucket.mode/);
     for (const input of [{ schedulesEnabled: 'false' }, { maxPlayers: 0 },
       { instanceType: 't4g.large' }, { webhook: 'secret' }, { worldName: 'bad\nvalue' }]) {
-      writeFileSync(file, JSON.stringify(input));
+      writeFileSync(file, JSON.stringify({ backupBucket: { mode: 'create' }, ...input }));
       assert.throws(() => loadConfig(file));
     }
     writeFileSync(join(dir, 'ca.pem'), '-----BEGIN PRIVATE KEY-----');
-    writeFileSync(file, JSON.stringify({ windowsCaCertificateFile: 'ca.pem' }));
+    writeFileSync(file, JSON.stringify({ backupBucket: { mode: 'create' }, windowsCaCertificateFile: 'ca.pem' }));
     assert.throws(() => loadConfig(file), /public CA/);
+  } finally { rmSync(dir, { recursive: true }); }
+});
+
+test('existing bucket is referenced without S3 resources; all writers and bootstrap use it', () => {
+  const bucketName = 'existing-world-backups';
+  const t = synth({
+    backupBucket: { mode: 'existing', bucketName },
+    windowsCaCertificate: '-----BEGIN CERTIFICATE-----\nPUBLIC-TEST-FIXTURE\n-----END CERTIFICATE-----',
+  });
+  t.resourceCountIs('AWS::S3::Bucket', 0);
+  t.resourceCountIs('AWS::S3::BucketPolicy', 0);
+  t.resourceCountIs('AWS::EC2::Instance', 1);
+  t.hasOutput('BackupBucket', { Value: bucketName });
+  const policies = t.findResources('AWS::IAM::Policy');
+  for (const [role, prefix] of [['ServerRole', 'corekeeper'], ['WindowsRole', 'windows']]) {
+    const policy = Object.entries(policies).find(([id]) => id.startsWith(role))![1];
+    const statements = policy.Properties.PolicyDocument.Statement;
+    assert.equal(statements.length, 1);
+    assert.deepEqual(statements[0].Action, ['s3:PutObject', 's3:AbortMultipartUpload']);
+    assert.ok(JSON.stringify(statements[0].Resource).includes(`${bucketName}/${prefix}/backups/*`));
+  }
+  const launch = Object.values(t.findResources('AWS::EC2::LaunchTemplate'))[0];
+  const script = Buffer.from(evaluate(launch.Properties.LaunchTemplateData.UserData), 'base64').toString();
+  const match = script.match(/printf '%s' '([^']+)' \| base64 -d > \/etc\/corekeeper\/config.json/)!;
+  assert.equal(JSON.parse(Buffer.from(match[1], 'base64').toString()).bucket, bucketName);
+});
+
+test('bucket selection must be explicit and rejects conflicting or invalid settings', () => {
+  assert.deepEqual(loadConfig(resolve('config.example.json')).backupBucket, { mode: 'create' });
+  assert.equal(loadConfig(resolve('config.existing-bucket.example.json')).backupBucket.mode, 'existing');
+  const dir = mkdtempSync(join(tmpdir(), 'corekeeper-bucket-'));
+  try {
+    const file = join(dir, 'config.json');
+    for (const backupBucket of [null, {}, { mode: 'other' }, { mode: 'existing' },
+      { mode: 'existing', bucketName: '' }, { mode: 'existing', bucketName: 's3://backups' },
+      { mode: 'existing', bucketName: 'arn:aws:s3:::backups' },
+      { mode: 'existing', bucketName: 'existing-backups', extra: true },
+      { mode: 'create', bucketName: 'existing-backups' }]) {
+      writeFileSync(file, JSON.stringify({ backupBucket }));
+      assert.throws(() => loadConfig(file), /backupBucket/);
+    }
+    writeFileSync(file, '{}');
+    assert.throws(() => loadConfig(file), /Explicitly set/);
   } finally { rmSync(dir, { recursive: true }); }
 });

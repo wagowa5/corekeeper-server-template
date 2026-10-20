@@ -1,7 +1,33 @@
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 
+export type BackupBucketConfig =
+  | { mode: 'create' }
+  | { mode: 'existing'; bucketName: string };
+
+function parseBackupBucket(value: unknown): BackupBucketConfig {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Explicitly set backupBucket.mode to create or existing in COREKEEPER_CONFIG');
+  }
+  const bucket = value as Record<string, unknown>;
+  if (bucket.mode !== 'create' && bucket.mode !== 'existing') {
+    throw new Error('backupBucket.mode must be create or existing');
+  }
+  const allowed = bucket.mode === 'create' ? ['mode'] : ['mode', 'bucketName'];
+  for (const key of Object.keys(bucket)) {
+    if (!allowed.includes(key)) throw new Error(`Unexpected backupBucket field for ${bucket.mode}: ${key}`);
+  }
+  if (bucket.mode === 'create') return { mode: 'create' };
+  if (typeof bucket.bucketName !== 'string' ||
+      !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket.bucketName) ||
+      bucket.bucketName.includes('..') || /^\d+\.\d+\.\d+\.\d+$/.test(bucket.bucketName)) {
+    throw new Error('backupBucket.bucketName must be an existing S3 bucket name, not an ARN or URL');
+  }
+  return { mode: 'existing', bucketName: bucket.bucketName };
+}
+
 export interface ServerConfig {
+  backupBucket: BackupBucketConfig;
   name: string;
   region: string;
   instanceType: string;
@@ -20,16 +46,18 @@ export function loadConfig(file?: string): ServerConfig {
   const input: Record<string, unknown> = file ? JSON.parse(readFileSync(file, 'utf8')) : {};
   const keys = new Set(['name', 'region', 'instanceType', 'containerImage', 'worldName',
     'maxPlayers', 'schedulesEnabled', 'startSchedule', 'stopSchedule',
-    'discordParameterArn', 'windowsCaCertificateFile', 'windowsCertificateCn']);
+    'discordParameterArn', 'windowsCaCertificateFile', 'windowsCertificateCn', 'backupBucket']);
   for (const key of Object.keys(input)) {
     if (!keys.has(key)) throw new Error(`Unknown config field: ${key}`);
   }
+  const backupBucket = parseBackupBucket(input.backupBucket);
   const config: ServerConfig = {
     name: 'corekeeper', region: 'ap-northeast-1', instanceType: 't3.large',
     containerImage: 'escaping/core-keeper-dedicated:latest', worldName: 'Core Keeper Server',
     maxPlayers: 4, schedulesEnabled: false, startSchedule: 'cron(0 18 * * ? *)',
     stopSchedule: 'cron(0 1 * * ? *)', windowsCertificateCn: 'corekeeper-friend-pc',
     ...Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'windowsCaCertificateFile')),
+    backupBucket,
   };
   for (const key of ['name', 'region', 'instanceType', 'containerImage', 'worldName',
     'startSchedule', 'stopSchedule', 'windowsCertificateCn'] as const) {

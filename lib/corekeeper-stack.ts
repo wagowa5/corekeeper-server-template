@@ -43,19 +43,23 @@ export class CoreKeeperStack extends Stack {
       securityGroupIngress: [],
       securityGroupEgress: [{ ipProtocol: '-1', cidrIp: '0.0.0.0/0' }],
     });
-    const bucket = new s3.Bucket(this, 'Backups', {
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      encryption: s3.BucketEncryption.S3_MANAGED, versioned: true, enforceSSL: true,
-      removalPolicy: RemovalPolicy.RETAIN, autoDeleteObjects: false,
-      lifecycleRules: [
-        ...['corekeeper/backups/', 'windows/backups/'].map(prefix => ({
-          id: prefix.replaceAll('/', '-'), prefix, expiration: Duration.days(30),
-          noncurrentVersionExpiration: Duration.days(30),
-          abortIncompleteMultipartUploadAfter: Duration.days(1),
-        })),
-        { id: 'expired-delete-markers', expiredObjectDeleteMarker: true },
-      ],
-    });
+    // Referencing a bucket does not adopt its ownership or change its settings.
+    // Only newly created buckets receive the lifecycle, encryption and policy below.
+    const bucket: s3.IBucket = c.backupBucket.mode === 'existing'
+      ? s3.Bucket.fromBucketName(this, 'ExistingBackups', c.backupBucket.bucketName)
+      : new s3.Bucket(this, 'Backups', {
+          blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+          encryption: s3.BucketEncryption.S3_MANAGED, versioned: true, enforceSSL: true,
+          removalPolicy: RemovalPolicy.RETAIN, autoDeleteObjects: false,
+          lifecycleRules: [
+            ...['corekeeper/backups/', 'windows/backups/'].map(prefix => ({
+              id: prefix.replaceAll('/', '-'), prefix, expiration: Duration.days(30),
+              noncurrentVersionExpiration: Duration.days(30),
+              abortIncompleteMultipartUploadAfter: Duration.days(1),
+            })),
+            { id: 'expired-delete-markers', expiredObjectDeleteMarker: true },
+          ],
+        });
     const serverRole = new iam.Role(this, 'ServerRole', {
       assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
       managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonSSMManagedInstanceCore')],

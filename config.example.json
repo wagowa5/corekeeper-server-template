@@ -1,4 +1,7 @@
 {
+  "backupBucket": {
+    "mode": "create"
+  },
   "name": "corekeeper",
   "region": "ap-northeast-1",
   "instanceType": "t3.large",
